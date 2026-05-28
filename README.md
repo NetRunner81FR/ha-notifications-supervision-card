@@ -1,13 +1,73 @@
 # Notifications Supervision Card
 
-Custom card Lovelace pour afficher dynamiquement les utilisateurs notifications
-et les blocs de supervision Home Assistant.
+Custom card Lovelace pour afficher et parametrer dynamiquement les utilisateurs
+notifications et les blocs de supervision Home Assistant.
 
 ## Installation HACS
 
-V1 cible : depot HACS de type Dashboard plugin.
+Type : Dashboard plugin.
+Depot GitHub : `https://github.com/NetRunner81FR/ha-notifications-supervision-card`
 
 ## Utilisation
+
+### Vue utilisateurs
+
+```yaml
+type: custom:notifications-supervision-card
+view: users
+ignored_persons:
+  - test_user
+  - tester_rec
+```
+
+### Vue audit personnes HA
+
+```yaml
+type: custom:notifications-supervision-card
+view: audit
+ignored_persons:
+  - test_user
+```
+
+### Vue supervision (tous les groupes)
+
+```yaml
+type: custom:notifications-supervision-card
+view: supervision
+```
+
+### Vue supervision (groupe unique)
+
+```yaml
+type: custom:notifications-supervision-card
+view: supervision
+group: mqtt
+```
+
+Valeurs de `group` disponibles par defaut :
+`inondation`, `portails`, `mqtt`, `zigbee`, `temperatures`, `rpi5`,
+`veilleuse`, `backup`.
+
+### Vue parametres (lecture)
+
+```yaml
+type: custom:notifications-supervision-card
+view: settings
+```
+
+### Vue parametres (edition)
+
+```yaml
+type: custom:notifications-supervision-card
+view: settings
+mode: edit
+```
+
+La vue `settings` avec `mode: edit` permet d'activer ou desactiver les helpers
+de notification via une allowlist stricte. La vue `supervision` reste toujours
+en lecture seule.
+
+### Mode legacy (retrocompatibilite v0.1.x)
 
 ```yaml
 type: custom:notifications-supervision-card
@@ -17,59 +77,45 @@ sections:
   - supervision
 ignored_persons:
   - test_user
-  - tester_rec
 ```
 
 ## Securite
 
-La carte est en lecture seule : elle lit `hass.states`, ne lance aucun service
-Home Assistant et ne contient aucun secret.
-
+- `supervision` : lecture seule, aucun appel de service.
+- `settings` / `mode: edit` : uniquement `input_boolean.callService` et
+  `input_text.set_value` sur entites correspondant a la regex allowlist.
+- Aucun appel reseau externe.
+- Aucun secret embarque.
+- Aucune commande PROD.
 
 ## Parametrage Home Assistant attendu
 
-Cette carte HACS affiche et pilote a terme des helpers Home Assistant existants.
-Elle n'installe pas le backend notification a elle seule. Le package HA doit
+La carte HACS affiche et pilote des helpers existants. Le package HA doit
 fournir :
 
-- `script.notify_transverse` ;
-- `input_boolean.notif_smtp_active` ;
-- `input_text.notif_<slug>_label` ;
-- `input_text.notif_<slug>_email` ;
-- `input_boolean.notif_<slug>_email_enabled` ;
-- `input_text.notif_<slug>_push_target` ;
-- `input_boolean.notif_<slug>_push_enabled` ;
-- les helpers de tiers `notif_<slug>_tier_*`.
+- `script.notify_transverse`
+- `input_boolean.notif_smtp_active`
+- `input_text.notif_<slug>_label`
+- `input_text.notif_<slug>_email`
+- `input_boolean.notif_<slug>_email_enabled`
+- `input_text.notif_<slug>_push_target`
+- `input_boolean.notif_<slug>_push_enabled`
+- `input_boolean.notif_<slug>_tier_*`
 
 ### SMTP
 
-Le service email attendu est `notify.notify_smtp`. Il doit etre configure dans
-Home Assistant avec des secrets locaux, jamais dans Git.
+Service attendu : `notify.notify_smtp`, configure avec secrets locaux, jamais
+dans Git.
 
 ### Push mobile_app
 
-Le service push attendu est actuellement stocke sous forme de texte dans
-`input_text.notif_<slug>_push_target`, au format `notify.mobile_app_<device>`.
-Une prochaine version pourra proposer une selection des services
-`notify.mobile_app_*` disponibles : un choix si plusieurs appareils existent,
-proposition automatique si un seul appareil est detecte.
-
-## Roadmap V1.x
-
-- Decouper la carte en vues/tuiles agenceables : `users`, `audit`,
-  `supervision`, `settings`.
-- Eviter toute carte monolithique tout en longueur.
-- Ajouter une vue `settings` permettant d'activer/desactiver explicitement les
-  notifications via allowlist de helpers.
-- Conserver la vue `supervision` en lecture seule.
-
+Cible stockee dans `input_text.notif_<slug>_push_target` au format
+`notify.mobile_app_<device>`. En vue `settings` + `mode: edit`, si des services
+`notify.mobile_app_*` sont detectes, un dropdown de selection est propose.
 
 ## Publication d'une nouvelle version
 
-Les versions HACS doivent etre publiees sous forme de GitHub Release. Un tag
-seul ne suffit pas.
-
-Process court :
+Les versions HACS doivent etre publiees sous forme de GitHub Release.
 
 ```bash
 git add .
@@ -83,9 +129,11 @@ git push origin vX.Y.Z
 
 Puis creer la release GitHub `vX.Y.Z` sur :
 
-```text
+```
 https://github.com/NetRunner81FR/ha-notifications-supervision-card/releases
 ```
 
 Apres publication, utiliser `Update information` dans HACS puis installer la
 nouvelle version en SANDBOX avant toute promotion.
+
+Procedure complete : `docs/procedures/composants-hacs-custom.md`
