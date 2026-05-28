@@ -1,9 +1,47 @@
-type: custom:notifications-supervision-card
-title: Notifications / Supervision
-sections:
-  - users
-  - audit
-  - supervision
-ignored_persons:
-  - test_user
-  - tester_rec
+# Exemples de configuration - Notifications Supervision Card v0.2.0
+
+# --- Tuiles agenceables (recommande) ---
+
+# Vue utilisateurs (1 colonne)
+- type: custom:notifications-supervision-card
+  view: users
+  ignored_persons:
+    - test_user
+    - tester_rec
+
+# Vue audit personnes HA (1 colonne)
+- type: custom:notifications-supervision-card
+  view: audit
+  ignored_persons:
+    - test_user
+    - tester_rec
+
+# Vue supervision complete (2 colonnes)
+- type: custom:notifications-supervision-card
+  view: supervision
+
+# Vue supervision groupe unique
+- type: custom:notifications-supervision-card
+  view: supervision
+  group: mqtt
+
+# Vue parametres lecture seule (2 colonnes)
+- type: custom:notifications-supervision-card
+  view: settings
+  mode: read
+
+# Vue parametres edition (2 colonnes)
+- type: custom:notifications-supervision-card
+  view: settings
+  mode: edit
+
+# --- Mode legacy (retrocompatibilite v0.1.x) ---
+- type: custom:notifications-supervision-card
+  title: Notifications / Supervision
+  sections:
+    - users
+    - audit
+    - supervision
+  ignored_persons:
+    - test_user
+    - tester_rec

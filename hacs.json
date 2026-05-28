@@ -1,5 +1,6 @@
 {
   "name": "Notifications Supervision Card",
   "content_in_root": true,
-  "filename": "notifications-supervision-card.js"
+  "filename": "notifications-supervision-card.js",
+  "homeassistant": "2023.1.0"
 }
