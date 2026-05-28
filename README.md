@@ -62,3 +62,30 @@ proposition automatique si un seul appareil est detecte.
 - Ajouter une vue `settings` permettant d'activer/desactiver explicitement les
   notifications via allowlist de helpers.
 - Conserver la vue `supervision` en lecture seule.
+
+
+## Publication d'une nouvelle version
+
+Les versions HACS doivent etre publiees sous forme de GitHub Release. Un tag
+seul ne suffit pas.
+
+Process court :
+
+```bash
+git add .
+git commit -m "feat: release vX.Y.Z"
+git push origin main
+git push github main
+git tag vX.Y.Z
+git push github vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Puis creer la release GitHub `vX.Y.Z` sur :
+
+```text
+https://github.com/NetRunner81FR/ha-notifications-supervision-card/releases
+```
+
+Apres publication, utiliser `Update information` dans HACS puis installer la
+nouvelle version en SANDBOX avant toute promotion.
