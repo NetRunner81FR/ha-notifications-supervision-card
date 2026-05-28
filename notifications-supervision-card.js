@@ -54,7 +54,7 @@ class NotificationsSupervisionCard extends HTMLElement {
               <h2>${this._escape(this._config.title)}</h2>
               <p>${users.length} utilisateur(s) notification · ${supervision.length} bloc(s) supervision</p>
             </div>
-            <span class="version">v0.1.0</span>
+            <span class="version">v0.1.1</span>
           </div>
           ${sections.has("users") ? this._renderUsers(users) : ""}
           ${sections.has("audit") ? this._renderAudit(audit) : ""}
@@ -194,11 +194,13 @@ class NotificationsSupervisionCard extends HTMLElement {
   `; }
 }
 
-customElements.define("notifications-supervision-card", NotificationsSupervisionCard);
+if (!customElements.get("notifications-supervision-card")) {
+  customElements.define("notifications-supervision-card", NotificationsSupervisionCard);
+}
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "notifications-supervision-card",
   name: "Notifications Supervision Card",
   description: "Carte dynamique pour les notifications et la supervision Home Assistant."
 });
-console.info("notifications-supervision-card v0.1.0 loaded");
+console.info("notifications-supervision-card v0.1.1 loaded");
