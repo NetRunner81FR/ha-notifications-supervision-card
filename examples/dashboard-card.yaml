@@ -1,0 +1,9 @@
+type: custom:notifications-supervision-card
+title: Notifications / Supervision
+sections:
+  - users
+  - audit
+  - supervision
+ignored_persons:
+  - test_user
+  - tester_rec
