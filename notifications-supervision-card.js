@@ -54,7 +54,7 @@ class NotificationsSupervisionCard extends HTMLElement {
               <h2>${this._escape(this._config.title)}</h2>
               <p>${users.length} utilisateur(s) notification · ${supervision.length} bloc(s) supervision</p>
             </div>
-            <span class="version">v0.1.1</span>
+            <span class="version">v0.1.2</span>
           </div>
           ${sections.has("users") ? this._renderUsers(users) : ""}
           ${sections.has("audit") ? this._renderAudit(audit) : ""}
@@ -203,4 +203,4 @@ window.customCards.push({
   name: "Notifications Supervision Card",
   description: "Carte dynamique pour les notifications et la supervision Home Assistant."
 });
-console.info("notifications-supervision-card v0.1.1 loaded");
+console.info("notifications-supervision-card v0.1.2 loaded");
