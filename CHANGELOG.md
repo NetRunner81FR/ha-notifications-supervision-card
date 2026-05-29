@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Fix : ajout de `input_number.temperature_anomalie_seuil_haut` et
+  `input_number.temperature_anomalie_seuil_bas` dans le groupe Temperatures
+  des groupes supervision par defaut (absents de la v0.2.0).
+- Fix : label groupe portails aligne sur l'historique : "Portails / Garage".
+
 ## 0.2.0
 
 - Architecture modulaire : parametre `view` remplace `sections`.

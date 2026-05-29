@@ -1,5 +1,5 @@
 const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 
 // Allowlist des entites modifiables depuis la vue settings/edit.
 // Toute entite hors regex est refusee meme si callService est appele.
@@ -230,7 +230,7 @@ class NotificationsSupervisionCard extends HTMLElement {
       },
       {
         id: "portails",
-        title: "Portails",
+        title: "Portails / Garage",
         icon: "mdi:gate",
         entities: [
           "input_boolean.portail_notifications",
@@ -264,6 +264,8 @@ class NotificationsSupervisionCard extends HTMLElement {
         entities: [
           "input_boolean.temperature_anomalie_notifications",
           "binary_sensor.temperature_anomalie_detectee",
+          "input_number.temperature_anomalie_seuil_haut",
+          "input_number.temperature_anomalie_seuil_bas",
           "input_text.temperature_anomalie_last_event",
         ],
       },
@@ -677,3 +679,4 @@ console.info(
   `%c${CARD_NAME} v${VERSION} loaded`,
   "color:#03a9f4;font-weight:bold;background:#e3f2fd;padding:2px 6px;border-radius:4px"
 );
+// v0.2.1: fix temperature seuils absents des groupes supervision par defaut
