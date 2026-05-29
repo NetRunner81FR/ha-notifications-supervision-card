@@ -2,6 +2,7 @@
 
 Custom card Lovelace pour afficher et parametrer dynamiquement les utilisateurs
 notifications et les blocs de supervision Home Assistant.
+Cette feature s'appuie sur des développements propriétaires et des modules non mis à disposition. Ce n'est pas destiné à être utilisé par le grand public
 
 ## Installation HACS
 
