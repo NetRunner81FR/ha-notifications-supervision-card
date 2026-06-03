@@ -1,5 +1,5 @@
 const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.3.1";
+const VERSION = "0.4.0";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -22,6 +22,10 @@ class NotificationsSupervisionCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    // Etat formulaire add/remove (persiste entre les renders hass)
+    this._addExpanded = null;  // slug person en cours d'ajout
+    this._addForm = {};        // valeurs du formulaire {label,id,email,pushTarget,roles}
+    this._removeConfirm = null; // slug user en attente de confirmation suppression
   }
 
   setConfig(config) {
@@ -108,7 +112,12 @@ class NotificationsSupervisionCard extends HTMLElement {
     } else if (view === "supervision") {
       body = this._renderSupervision(this._discoverSupervision());
     } else if (view === "settings") {
-      body = this._renderSettings();
+      if (!this._hasNotifEntities()) {
+        body = this._renderSetupGuide();
+      } else {
+        const users = this._discoverUsers();
+        body = this._renderSettings(users);
+      }
     } else {
       body = `<div class="empty">Vue inconnue : ${this._escape(view)}</div>`;
     }
@@ -125,7 +134,7 @@ class NotificationsSupervisionCard extends HTMLElement {
         </div>
       </ha-card>`;
 
-    if (view === "settings" && this._config.mode === "edit") {
+    if (view === "settings") {
       this._attachSettingsListeners();
     }
   }
@@ -207,6 +216,32 @@ class NotificationsSupervisionCard extends HTMLElement {
       }
     }
     return { persons, missing, ignored: ignoredList };
+  }
+
+  // Vrai si notifications_manager est charge (au moins une entite notif existe)
+  _hasNotifEntities() {
+    return Object.keys(this._hass.states || {}).some(
+      (id) => id.startsWith("text.notif_") || id.startsWith("switch.notif_")
+    );
+  }
+
+  // Derive un slug ASCII depuis un friendly_name
+  _toSlug(name) {
+    return String(name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 30);
+  }
+
+  // Vrai si le slug correspond au compte HA courant (protection anti-lockout)
+  _isSelf(slug) {
+    if (!this._hass.user) return false;
+    const haName = (this._hass.user.name || "").toLowerCase();
+    const label = (this._state(`text.notif_${slug}_label`) || "").toLowerCase();
+    return label === haName || slug === haName.replace(/[^a-z0-9]/g, "_");
   }
 
   _discoverSupervision() {
@@ -401,21 +436,21 @@ class NotificationsSupervisionCard extends HTMLElement {
     return `<div class="grid">${tiles}</div>`;
   }
 
-  _renderSettings() {
+  _renderSettings(users) {
     const access = this._resolveSettingsAccess();
     if (access === "none") {
       return `<div class="banner read-banner">Accès non autorisé.</div>`;
     }
-    const editable = access === "write";
-    const users = this._discoverUsers();
+    const editable = access === "write" && this._config.mode === "edit";
     const mobileApps = this._detectMobileApps();
     const domainIds = this._discoverDomainNotifications();
 
     const banner = editable
       ? `<div class="banner edit-banner">Mode édition — modifications appliquées immédiatement</div>`
-      : `<div class="banner read-banner">Lecture seule (rôle propriétaire).</div>`;
+      : access === "write"
+        ? `<div class="banner read-banner">Lecture seule — ajoutez <code>mode: edit</code> pour modifier.</div>`
+        : `<div class="banner read-banner">Lecture seule (rôle propriétaire).</div>`;
 
-    // Canal global SMTP
     const smtpHtml = this._settingsToggle(
       "input_boolean.notif_smtp_active",
       "Canal email global (SMTP)",
@@ -423,49 +458,59 @@ class NotificationsSupervisionCard extends HTMLElement {
       editable
     );
 
-    // Par utilisateur
     const rolesLabels = [
       ["Admin", "role_admin"],
       ["Propriétaire", "role_proprietaire"],
       ["Résident", "role_resident"],
       ["Utilisateur", "role_utilisateur"],
     ];
-    const userTiles = users
-      .map(
-        (u) => `<article class="tile">
-        <div class="tile-head"><strong>${this._escape(u.label)}</strong></div>
+
+    const userTiles = users.map((u) => {
+      if (editable && this._removeConfirm === u.slug) {
+        return this._renderRemoveConfirm(u);
+      }
+      const removeBtn = editable && !this._isSelf(u.slug)
+        ? `<button class="danger-btn" data-remove-user="${this._escape(u.slug)}">Retirer</button>`
+        : "";
+      return `<article class="tile">
+        <div class="tile-head">
+          <strong>${this._escape(u.label)}</strong>
+          ${removeBtn}
+        </div>
         <div class="rows">
-          ${this._settingsToggle(
-            `switch.notif_${u.slug}_email_enabled`,
-            "Email",
-            u.emailEnabled,
-            editable
-          )}
+          ${this._settingsToggle(`switch.notif_${u.slug}_email_enabled`, "Email", u.emailEnabled, editable)}
           ${this._settingsPushRow(u, mobileApps, editable)}
           ${rolesLabels.map(([name, key]) => this._settingsToggle(
-            `switch.notif_${u.slug}_${key}`,
-            name,
-            this._boolState(`switch.notif_${u.slug}_${key}`),
-            editable
+            `switch.notif_${u.slug}_${key}`, name,
+            this._boolState(`switch.notif_${u.slug}_${key}`), editable
           )).join("")}
         </div>
-      </article>`
-      )
-      .join("");
+      </article>`;
+    }).join("");
 
-    // Notifications metier
-    const domainHtml = domainIds
-      .map((id) => {
-        const friendly =
-          this._hass.states[id]?.attributes?.friendly_name || id;
-        return this._settingsToggle(
-          id,
-          friendly,
-          this._boolState(id),
-          editable
-        );
-      })
-      .join("");
+    // Personnes sans profil (section add)
+    const audit = this._auditPersons(users);
+    let unconfiguredHtml = "";
+    if (editable) {
+      if (audit.missing.length === 0) {
+        unconfiguredHtml = `<p class="empty">✅ Toutes les personnes HA visibles ont un profil notifications.</p>`;
+      } else {
+        unconfiguredHtml = audit.missing.map((p) => {
+          if (this._addExpanded === p.id) {
+            return this._renderAddForm(p);
+          }
+          return `<div class="person-row">
+            <span>👤 ${this._escape(p.name)}</span>
+            <button class="add-btn" data-add-person="${this._escape(p.id)}" data-person-name="${this._escape(p.name)}">+ Ajouter</button>
+          </div>`;
+        }).join("");
+      }
+    }
+
+    const domainHtml = domainIds.map((id) => {
+      const friendly = this._hass.states[id]?.attributes?.friendly_name || id;
+      return this._settingsToggle(id, friendly, this._boolState(id), editable);
+    }).join("");
 
     return `
       ${banner}
@@ -473,16 +518,96 @@ class NotificationsSupervisionCard extends HTMLElement {
         <h3>Canal global</h3>
         <article class="tile wide"><div class="rows">${smtpHtml}</div></article>
       </section>
-      ${
-        users.length
-          ? `<section><h3>Utilisateurs</h3><div class="grid">${userTiles}</div></section>`
-          : ""
-      }
-      ${
-        domainHtml
-          ? `<section><h3>Notifications métier</h3><article class="tile wide"><div class="rows">${domainHtml}</div></article></section>`
-          : ""
-      }`;
+      ${users.length || editable
+        ? `<section>
+            <h3>Utilisateurs configurés</h3>
+            ${users.length ? `<div class="grid">${userTiles}</div>` : `<p class="empty">Aucun utilisateur configuré.</p>`}
+           </section>`
+        : ""}
+      ${editable
+        ? `<section>
+            <h3>Personnes sans profil</h3>
+            <article class="tile wide"><div class="person-list">${unconfiguredHtml}</div></article>
+           </section>`
+        : ""}
+      ${domainHtml
+        ? `<section><h3>Notifications métier</h3><article class="tile wide"><div class="rows">${domainHtml}</div></article></section>`
+        : ""}`;
+  }
+
+  _renderSetupGuide() {
+    return `<div class="setup-guide">
+      <div class="setup-icon">⚙️</div>
+      <h3>Configuration requise</h3>
+      <p>L'intégration <code>notifications_manager</code> n'est pas chargée
+      ou aucun utilisateur n'est encore configuré.</p>
+      <ol>
+        <li>Installez <code>notifications_manager</code> (HACS ou manuel dans <code>custom_components/</code>)</li>
+        <li>Ajoutez <code>notifications_manager: {}</code> à <code>configuration.yaml</code></li>
+        <li>Créez <code>notifications_users.yaml</code> (voir <code>examples/</code> du dépôt HACS)</li>
+        <li>Redémarrez Home Assistant</li>
+      </ol>
+      <p class="setup-hint">Documentation complète dans le README du dépôt HACS.</p>
+    </div>`;
+  }
+
+  _renderAddForm(person) {
+    const f = this._addForm;
+    const defaultLabel = f.label !== undefined ? f.label : person.name;
+    const defaultId = f.id !== undefined ? f.id : this._toSlug(person.name);
+    const slugValid = /^[a-z0-9][a-z0-9_]{0,29}$/.test(defaultId);
+    const rolesLabels = [
+      ["Admin", "admin"], ["Propriétaire", "proprietaire"],
+      ["Résident", "resident"], ["Utilisateur", "utilisateur"],
+    ];
+    const rolesHtml = rolesLabels.map(([name, key]) => {
+      const checked = f.roles?.[key] ? "checked" : "";
+      return `<label class="role-check">
+        <input type="checkbox" data-role="${key}" ${checked}> ${this._escape(name)}
+      </label>`;
+    }).join("");
+
+    const mobileApps = this._detectMobileApps();
+    const pushOpts = mobileApps.length > 1
+      ? `<select class="push-select add-push-select">
+          <option value="">(saisie manuelle)</option>
+          ${mobileApps.map((a) => `<option value="${this._escape(a)}" ${f.pushTarget === a ? "selected" : ""}>${this._escape(a)}</option>`).join("")}
+         </select>`
+      : `<input type="text" class="form-input" data-field="pushTarget" placeholder="notify.mobile_app_..." value="${this._escape(f.pushTarget || (mobileApps[0] || ""))}">`;
+
+    return `<div class="form-card" data-form-person="${this._escape(person.id)}">
+      <div class="form-title">👤 ${this._escape(person.name)}</div>
+      <div class="form-rows">
+        <label>Libellé
+          <input type="text" class="form-input" data-field="label" value="${this._escape(defaultLabel)}">
+        </label>
+        <label>Slug (id) ${slugValid ? "" : `<span class="slug-error">invalide</span>`}
+          <input type="text" class="form-input slug-input ${slugValid ? "" : "invalid"}" data-field="id" value="${this._escape(defaultId)}" placeholder="ex: jean_marc">
+        </label>
+        <label>Email
+          <input type="text" class="form-input" data-field="email" placeholder="adresse@exemple.fr" value="${this._escape(f.email || "")}">
+        </label>
+        <label>Push cible
+          ${pushOpts}
+        </label>
+        <div class="roles-row">${rolesHtml}</div>
+      </div>
+      <div class="form-actions">
+        <button class="add-confirm-btn" data-confirm-add="${this._escape(person.id)}" ${slugValid ? "" : "disabled"}>Confirmer l'ajout</button>
+        <button class="cancel-btn" data-cancel-add="${this._escape(person.id)}">Annuler</button>
+      </div>
+    </div>`;
+  }
+
+  _renderRemoveConfirm(user) {
+    return `<article class="tile tile-danger">
+      <div class="tile-head"><strong>${this._escape(user.label)}</strong></div>
+      <p class="danger-msg">Supprimer ce profil ? Cette action retire toutes les entités de cet utilisateur.</p>
+      <div class="form-actions">
+        <button class="danger-confirm-btn" data-confirm-remove="${this._escape(user.slug)}">Confirmer la suppression</button>
+        <button class="cancel-btn" data-cancel-remove="${this._escape(user.slug)}">Annuler</button>
+      </div>
+    </article>`;
   }
 
   // ── Composants settings ────────────────────────────────────────────────────
@@ -545,35 +670,145 @@ class NotificationsSupervisionCard extends HTMLElement {
     return toggleHtml;
   }
 
-  // ── Listeners interactifs (settings edit) ─────────────────────────────────
+  // ── Listeners interactifs (settings) ─────────────────────────────────────
 
   _attachSettingsListeners() {
     if (!this.shadowRoot) return;
-    this.shadowRoot.querySelectorAll("input[data-entity]").forEach((input) => {
+    const root = this.shadowRoot;
+
+    // Toggles entites existantes
+    root.querySelectorAll("input[data-entity]").forEach((input) => {
       input.addEventListener("change", (e) => {
         const id = e.target.dataset.entity;
         if (SETTINGS_ALLOWLIST.test(id)) {
-          // Routage selon le domaine de l entite
           const domain = id.startsWith("switch.") ? "switch" : "input_boolean";
           this._hass.callService(domain, "toggle", { entity_id: id });
         }
       });
     });
-    this.shadowRoot
-      .querySelectorAll("select.push-select[data-push-entity]")
-      .forEach((sel) => {
-        sel.addEventListener("change", (e) => {
-          const id = e.target.dataset.pushEntity;
-          const val = e.target.value;
-          if (val && PUSH_TARGET_ALLOWLIST.test(id)) {
-            // text.* via service text.set_value
-            this._hass.callService("text", "set_value", {
-              entity_id: id,
-              value: val,
-            });
-          }
-        });
+
+    // Select push cible utilisateur existant
+    root.querySelectorAll("select.push-select[data-push-entity]").forEach((sel) => {
+      sel.addEventListener("change", (e) => {
+        const id = e.target.dataset.pushEntity;
+        const val = e.target.value;
+        if (val && PUSH_TARGET_ALLOWLIST.test(id)) {
+          this._hass.callService("text", "set_value", { entity_id: id, value: val });
+        }
       });
+    });
+
+    // Bouton Retirer : afficher confirmation
+    root.querySelectorAll("[data-remove-user]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        this._removeConfirm = e.currentTarget.dataset.removeUser;
+        this._addExpanded = null;
+        this._render();
+      });
+    });
+
+    // Bouton Confirmer suppression
+    root.querySelectorAll("[data-confirm-remove]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const slug = e.currentTarget.dataset.confirmRemove;
+        this._hass.callService("notifications_manager", "remove_user", { id: slug });
+        this._removeConfirm = null;
+        this._render();
+      });
+    });
+
+    // Bouton Annuler suppression
+    root.querySelectorAll("[data-cancel-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this._removeConfirm = null;
+        this._render();
+      });
+    });
+
+    // Bouton + Ajouter : ouvrir formulaire
+    root.querySelectorAll("[data-add-person]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const personId = e.currentTarget.dataset.addPerson;
+        const personName = e.currentTarget.dataset.personName || "";
+        this._addExpanded = personId;
+        this._addForm = {
+          label: personName,
+          id: this._toSlug(personName),
+          email: "",
+          pushTarget: this._detectMobileApps()[0] || "",
+          roles: {},
+        };
+        this._removeConfirm = null;
+        this._render();
+      });
+    });
+
+    // Inputs du formulaire d'ajout : mettre a jour _addForm
+    root.querySelectorAll(".form-card input[data-field]").forEach((input) => {
+      input.addEventListener("input", (e) => {
+        this._addForm[e.target.dataset.field] = e.target.value;
+        // Re-render uniquement pour valider le slug (disable/enable bouton)
+        if (e.target.dataset.field === "id") this._render();
+      });
+    });
+
+    // Select push dans formulaire d'ajout
+    root.querySelectorAll(".add-push-select").forEach((sel) => {
+      sel.addEventListener("change", (e) => {
+        this._addForm.pushTarget = e.target.value;
+      });
+    });
+
+    // Checkboxes roles dans formulaire d'ajout
+    root.querySelectorAll(".form-card input[data-role]").forEach((cb) => {
+      cb.addEventListener("change", (e) => {
+        if (!this._addForm.roles) this._addForm.roles = {};
+        this._addForm.roles[e.target.dataset.role] = e.target.checked;
+      });
+    });
+
+    // Bouton Confirmer l'ajout
+    root.querySelectorAll("[data-confirm-add]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const f = this._addForm;
+        // Lire les valeurs actuelles depuis le DOM avant d'appeler le service
+        const labelInput = root.querySelector(".form-card input[data-field='label']");
+        const idInput = root.querySelector(".form-card input[data-field='id']");
+        const emailInput = root.querySelector(".form-card input[data-field='email']");
+        const pushInput = root.querySelector(".form-card input[data-field='pushTarget']");
+        const label = (labelInput?.value || f.label || "").trim();
+        const id = (idInput?.value || f.id || "").trim();
+        const email = (emailInput?.value || f.email || "").trim();
+        const pushTarget = (pushInput?.value || f.pushTarget || "").trim()
+          || root.querySelector(".add-push-select")?.value || "";
+
+        if (!id || !/^[a-z0-9][a-z0-9_]{0,29}$/.test(id)) return;
+
+        const roles = {};
+        root.querySelectorAll(".form-card input[data-role]").forEach((cb) => {
+          roles[cb.dataset.role] = cb.checked;
+        });
+
+        this._hass.callService("notifications_manager", "add_user", {
+          id, label,
+          email, email_enabled: Boolean(email),
+          push_target: pushTarget, push_enabled: Boolean(pushTarget),
+          roles,
+        });
+        this._addExpanded = null;
+        this._addForm = {};
+        this._render();
+      });
+    });
+
+    // Bouton Annuler ajout
+    root.querySelectorAll("[data-cancel-add]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this._addExpanded = null;
+        this._addForm = {};
+        this._render();
+      });
+    });
   }
 
   // ── Utilitaires HTML ───────────────────────────────────────────────────────
@@ -676,6 +911,35 @@ class NotificationsSupervisionCard extends HTMLElement {
       input:checked+.slider{background:var(--primary-color,#03a9f4)}
       input:checked+.slider::before{transform:translateX(16px)}
       select.push-select{border:1px solid var(--divider-color);border-radius:6px;padding:3px 6px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);max-width:160px}
+      .add-btn{background:var(--primary-color,#03a9f4);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+      .add-btn:hover{opacity:.85}
+      .danger-btn{background:transparent;color:var(--error-color,#e53935);border:1px solid var(--error-color,#e53935);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer}
+      .danger-btn:hover{background:rgba(229,57,53,.08)}
+      .danger-confirm-btn{background:var(--error-color,#e53935);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+      .cancel-btn{background:transparent;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+      .add-confirm-btn{background:var(--primary-color,#03a9f4);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+      .add-confirm-btn:disabled{opacity:.4;cursor:default}
+      .person-list{display:grid;gap:8px}
+      .person-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;font-size:13px}
+      .tile-danger{border-color:var(--error-color,#e53935);background:rgba(229,57,53,.04)}
+      .danger-msg{font-size:12px;color:var(--secondary-text-color);margin:6px 0 10px}
+      .form-card{border:1px solid var(--primary-color,#03a9f4);border-radius:12px;padding:12px;background:var(--card-background-color)}
+      .form-title{font-weight:700;font-size:13px;margin-bottom:10px}
+      .form-rows{display:grid;gap:8px;margin-bottom:12px}
+      .form-rows label{font-size:12px;color:var(--secondary-text-color);display:grid;gap:3px}
+      .form-input{border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);width:100%;box-sizing:border-box}
+      .form-input.invalid{border-color:var(--error-color,#e53935)}
+      .slug-error{color:var(--error-color,#e53935);font-size:11px;margin-left:6px}
+      .roles-row{display:flex;gap:10px;flex-wrap:wrap}
+      .role-check{display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;color:var(--primary-text-color)}
+      .form-actions{display:flex;gap:8px;flex-wrap:wrap}
+      .setup-guide{padding:16px;text-align:center}
+      .setup-icon{font-size:32px;margin-bottom:8px}
+      .setup-guide h3{font-size:14px;font-weight:700;margin:0 0 8px}
+      .setup-guide p{font-size:13px;color:var(--secondary-text-color);margin:6px 0}
+      .setup-guide ol{text-align:left;display:inline-block;font-size:13px;line-height:1.8;padding-left:20px}
+      .setup-guide code{background:rgba(0,0,0,.08);padding:1px 5px;border-radius:4px;font-size:11px}
+      .setup-hint{font-size:11px;font-style:italic}
       @media(max-width:520px){
         .card{padding:10px}
         .grid{grid-template-columns:1fr}
