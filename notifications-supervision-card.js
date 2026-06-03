@@ -1,5 +1,5 @@
 const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -351,7 +351,7 @@ class NotificationsSupervisionCard extends HTMLElement {
             )}
             ${this._row(
               "Niveaux",
-              u.tiers.length ? u.roles.join(", ") : "Aucun",
+              u.roles.length ? u.roles.join(", ") : "Aucun",
               ""
             )}
           </div>
