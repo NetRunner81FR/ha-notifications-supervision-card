@@ -1,13 +1,12 @@
 const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.2.1";
+const VERSION = "0.3.0";
 
-// Allowlist des entites modifiables depuis la vue settings/edit.
-// Toute entite hors regex est refusee meme si callService est appele.
+// Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
-  /^input_boolean\.(notif_smtp_active|notif_[a-z0-9_]+_(email|push)_enabled|[a-z0-9_]+_notifications)$/;
+  /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|input_boolean\.notif_smtp_active|input_boolean\.[a-z0-9_]+_notifications)$/;
 
-// Allowlist push target : uniquement input_text de cible push utilisateur
-const PUSH_TARGET_ALLOWLIST = /^input_text\.notif_[a-z0-9_]+_push_target$/;
+// Allowlist push target : text.notif_*_push_target (notifications_manager v1+)
+const PUSH_TARGET_ALLOWLIST = /^text\.notif_[a-z0-9_]+_push_target$/;
 
 class NotificationsSupervisionCard extends HTMLElement {
   static getStubConfig() {
@@ -135,38 +134,49 @@ class NotificationsSupervisionCard extends HTMLElement {
 
   _discoverUsers() {
     return Object.keys(this._hass.states || {})
-      .filter(
-        (id) =>
-          id.startsWith("input_text.notif_") && id.endsWith("_label")
-      )
+      .filter((id) => id.startsWith("text.notif_") && id.endsWith("_label"))
       .map((id) => {
-        const slug = id.slice("input_text.notif_".length, -"_label".length);
+        const slug = id.slice("text.notif_".length, -"_label".length);
         return {
           slug,
           label: this._state(id),
-          email: this._state(`input_text.notif_${slug}_email`),
-          emailEnabled: this._boolState(
-            `input_boolean.notif_${slug}_email_enabled`
-          ),
-          pushTarget: this._state(`input_text.notif_${slug}_push_target`),
-          pushEnabled: this._boolState(
-            `input_boolean.notif_${slug}_push_enabled`
-          ),
-          tiers: [
-            ["Admin", "tier_admin"],
-            ["Propriétaire", "tier_proprietaire"],
-            ["Résident", "tier_resident"],
-            ["Utilisateur", "tier_utilisateur"],
+          email: this._state(`text.notif_${slug}_email`),
+          emailEnabled: this._boolState(`switch.notif_${slug}_email_enabled`),
+          pushTarget: this._state(`text.notif_${slug}_push_target`),
+          pushEnabled: this._boolState(`switch.notif_${slug}_push_enabled`),
+          roles: [
+            ["Admin", "role_admin"],
+            ["Propriétaire", "role_proprietaire"],
+            ["Résident", "role_resident"],
+            ["Utilisateur", "role_utilisateur"],
           ]
-            .filter(
-              ([, k]) =>
-                this._boolState(`input_boolean.notif_${slug}_${k}`) === true
-            )
+            .filter(([, k]) => this._boolState(`switch.notif_${slug}_${k}`) === true)
             .map(([name]) => name),
         };
       })
       .filter((u) => this._isUseful(u.label))
       .sort((a, b) => a.label.localeCompare(b.label, "fr"));
+  }
+
+  // Resout le niveau d acces a la vue settings pour l utilisateur HA courant.
+  // Retourne "write", "read" ou "none".
+  _resolveSettingsAccess() {
+    if (!this._hass) return "none";
+    if (this._hass.user?.is_admin) return "write";
+    const haName = (this._hass.user?.name || "").toLowerCase();
+    if (!haName) return "none";
+    // Chercher un profil dont ha_user correspond au compte HA courant
+    const slug = Object.keys(this._hass.states || {})
+      .filter((id) => id.startsWith("text.notif_") && id.endsWith("_label"))
+      .map((id) => id.slice("text.notif_".length, -"_label".length))
+      .find((s) => {
+        const label = (this._state(`text.notif_${s}_label`) || "").toLowerCase();
+        return label === haName || s === haName.replace(/[^a-z0-9]/g, "_");
+      });
+    if (!slug) return "none";
+    if (this._boolState(`switch.notif_${slug}_role_admin`) === true) return "write";
+    if (this._boolState(`switch.notif_${slug}_role_proprietaire`) === true) return "read";
+    return "none";
   }
 
   _auditPersons(users) {
@@ -322,7 +332,7 @@ class NotificationsSupervisionCard extends HTMLElement {
     }
     const tiles = users
       .map((u) => {
-        const ok = u.emailEnabled || u.pushEnabled || u.tiers.length > 0;
+        const ok = u.emailEnabled || u.pushEnabled || u.roles.length > 0;
         return `<article class="tile">
           <div class="tile-head">
             <strong>${this._escape(u.label)}</strong>
@@ -341,7 +351,7 @@ class NotificationsSupervisionCard extends HTMLElement {
             )}
             ${this._row(
               "Niveaux",
-              u.tiers.length ? u.tiers.join(", ") : "Aucun",
+              u.tiers.length ? u.roles.join(", ") : "Aucun",
               ""
             )}
           </div>
@@ -392,14 +402,18 @@ class NotificationsSupervisionCard extends HTMLElement {
   }
 
   _renderSettings() {
-    const editable = this._config.mode === "edit";
+    const access = this._resolveSettingsAccess();
+    if (access === "none") {
+      return `<div class="banner read-banner">Accès non autorisé.</div>`;
+    }
+    const editable = access === "write";
     const users = this._discoverUsers();
     const mobileApps = this._detectMobileApps();
     const domainIds = this._discoverDomainNotifications();
 
     const banner = editable
       ? `<div class="banner edit-banner">Mode édition — modifications appliquées immédiatement</div>`
-      : `<div class="banner read-banner">Lecture seule — ajoutez <code>mode: edit</code> pour modifier</div>`;
+      : `<div class="banner read-banner">Lecture seule (rôle propriétaire).</div>`;
 
     // Canal global SMTP
     const smtpHtml = this._settingsToggle(
@@ -410,18 +424,30 @@ class NotificationsSupervisionCard extends HTMLElement {
     );
 
     // Par utilisateur
+    const rolesLabels = [
+      ["Admin", "role_admin"],
+      ["Propriétaire", "role_proprietaire"],
+      ["Résident", "role_resident"],
+      ["Utilisateur", "role_utilisateur"],
+    ];
     const userTiles = users
       .map(
         (u) => `<article class="tile">
         <div class="tile-head"><strong>${this._escape(u.label)}</strong></div>
         <div class="rows">
           ${this._settingsToggle(
-            `input_boolean.notif_${u.slug}_email_enabled`,
+            `switch.notif_${u.slug}_email_enabled`,
             "Email",
             u.emailEnabled,
             editable
           )}
           ${this._settingsPushRow(u, mobileApps, editable)}
+          ${rolesLabels.map(([name, key]) => this._settingsToggle(
+            `switch.notif_${u.slug}_${key}`,
+            name,
+            this._boolState(`switch.notif_${u.slug}_${key}`),
+            editable
+          )).join("")}
         </div>
       </article>`
       )
@@ -481,7 +507,7 @@ class NotificationsSupervisionCard extends HTMLElement {
   _settingsPushRow(user, mobileApps, editable) {
     // Toggle push enabled
     const toggleHtml = this._settingsToggle(
-      `input_boolean.notif_${user.slug}_push_enabled`,
+      `switch.notif_${user.slug}_push_enabled`,
       "Push",
       user.pushEnabled,
       editable
@@ -501,7 +527,7 @@ class NotificationsSupervisionCard extends HTMLElement {
       const selectHtml = `<div class="row">
         <span>Cible push</span>
         <select class="push-select" data-push-entity="${this._escape(
-          `input_text.notif_${user.slug}_push_target`
+          `text.notif_${user.slug}_push_target`
         )}">${opts}</select>
       </div>`;
       return toggleHtml + selectHtml;
@@ -527,9 +553,9 @@ class NotificationsSupervisionCard extends HTMLElement {
       input.addEventListener("change", (e) => {
         const id = e.target.dataset.entity;
         if (SETTINGS_ALLOWLIST.test(id)) {
-          this._hass.callService("input_boolean", "toggle", {
-            entity_id: id,
-          });
+          // Routage selon le domaine de l entite
+          const domain = id.startsWith("switch.") ? "switch" : "input_boolean";
+          this._hass.callService(domain, "toggle", { entity_id: id });
         }
       });
     });
@@ -540,7 +566,8 @@ class NotificationsSupervisionCard extends HTMLElement {
           const id = e.target.dataset.pushEntity;
           const val = e.target.value;
           if (val && PUSH_TARGET_ALLOWLIST.test(id)) {
-            this._hass.callService("input_text", "set_value", {
+            // text.* via service text.set_value
+            this._hass.callService("text", "set_value", {
               entity_id: id,
               value: val,
             });
@@ -679,4 +706,4 @@ console.info(
   `%c${CARD_NAME} v${VERSION} loaded`,
   "color:#03a9f4;font-weight:bold;background:#e3f2fd;padding:2px 6px;border-radius:4px"
 );
-// v0.2.1: fix temperature seuils absents des groupes supervision par defaut
+// v0.3.0: notifications_manager integration — switch/text entities, role-based access
