@@ -1,0 +1,55 @@
+# Exemple de dashboard Lovelace utilisant les 4 vues de la card.
+# A enregistrer dans configuration.yaml sous lovelace.dashboards ou
+# a importer depuis l'interface HA (mode storage).
+
+views:
+  - title: Notifications
+    path: notifications
+    icon: mdi:bell-cog-outline
+    type: sections
+    max_columns: 2
+    sections:
+      # Vue settings : gestion des profils utilisateurs (admin uniquement)
+      # Ajoutez mode: edit pour activer la modification
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:notifications-supervision-card
+            view: settings
+            mode: edit
+
+      # Vue utilisateurs : liste des profils configures
+      - type: grid
+        cards:
+          - type: custom:notifications-supervision-card
+            view: users
+
+      # Vue audit : personnes HA vs profils configures
+      - type: grid
+        cards:
+          - type: custom:notifications-supervision-card
+            view: audit
+
+  - title: Supervision
+    path: supervision
+    icon: mdi:shield-check-outline
+    sections:
+      # Vue supervision globale
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:notifications-supervision-card
+            view: supervision
+
+      # Vue supervision par groupe (exemples)
+      - type: grid
+        cards:
+          - type: custom:notifications-supervision-card
+            view: supervision
+            group: mqtt
+
+      - type: grid
+        cards:
+          - type: custom:notifications-supervision-card
+            view: supervision
+            group: temperatures

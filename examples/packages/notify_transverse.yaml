@@ -1,0 +1,110 @@
+###############################################################################
+# Factory package: notify_transverse
+# Version: v2.0.0
+# Compatibility: Home Assistant 2026.x
+# Last reviewed: 2026-06-02
+# Notes: script central de notification. Les profils utilisateurs sont desormais
+# geres par l'integration notifications_manager (custom_components).
+# Entites : switch.notif_*_role_* / switch.notif_*_email_enabled etc.
+# Parametre 'tiers' renomme en 'roles' (retro-compat: les deux acceptes en v2).
+###############################################################################
+
+###############################################################################
+# HELPER GLOBAL
+###############################################################################
+input_boolean:
+  notif_smtp_active:
+    name: "Notifications - SMTP actif"
+    icon: mdi:email-check-outline
+
+###############################################################################
+# SCRIPT CENTRAL
+###############################################################################
+script:
+  notify_transverse:
+    alias: "Notifications - Script transverse"
+    mode: parallel
+    max: 10
+    fields:
+      title:
+        description: "Titre de la notification"
+        example: "Coupure secteur"
+      message:
+        description: "Corps de la notification"
+        example: "UPS sur batterie"
+      category:
+        description: "Severite : info, alerte, critique"
+        example: "alerte"
+      roles:
+        description: "Roles cibles : admin, proprietaire, resident, utilisateur"
+        example: "[admin]"
+      tiers:
+        description: "Alias retro-compat de roles (v1). Preferer roles."
+        example: "[admin]"
+
+    sequence:
+      - variables:
+          # Decouverte dynamique via text.notif_*_label (integration notifications_manager)
+          slugs: >
+            {% set ns = namespace(slugs=[]) %}
+            {% for e in states.text %}
+              {% if e.entity_id.startswith('text.notif_')
+                    and e.entity_id.endswith('_label') %}
+                {% set slug = e.entity_id
+                  | replace('text.notif_', '')
+                  | replace('_label', '') %}
+                {% set ns.slugs = ns.slugs + [slug] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.slugs }}
+          # Retro-compat : accepte 'roles' ou 'tiers'
+          roles_s: "{{ roles | default(tiers | default([])) }}"
+          effective_title: >
+            {% set v = states('input_text.ha_environment_label') | trim %}
+            {% if v not in ['', 'unknown', 'unavailable', 'none'] %}[{{ v }}] {{ title | default('') }}{% else %}{{ title | default('') }}{% endif %}
+
+      - repeat:
+          for_each: "{{ slugs }}"
+          sequence:
+            - variables:
+                slug: "{{ repeat.item }}"
+                role_match: >
+                  {% set ns = namespace(match=false) %}
+                  {% for r in roles_s %}
+                    {% if is_state('switch.notif_' ~ slug ~ '_role_' ~ r, 'on') %}
+                      {% set ns.match = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ ns.match }}
+                push_target: >
+                  {{ states('text.notif_' ~ slug ~ '_push_target') | trim }}
+                push_ok: >
+                  {% set target = states('text.notif_' ~ slug ~ '_push_target') | trim %}
+                  {{ is_state('switch.notif_' ~ slug ~ '_push_enabled', 'on')
+                     and target not in ['', 'unknown', 'unavailable', 'none'] }}
+                email_addr: >
+                  {{ states('text.notif_' ~ slug ~ '_email') | trim }}
+                email_ok: >
+                  {% set addr = states('text.notif_' ~ slug ~ '_email') | trim %}
+                  {{ is_state('input_boolean.notif_smtp_active', 'on')
+                     and is_state('switch.notif_' ~ slug ~ '_email_enabled', 'on')
+                     and addr not in ['', 'unknown', 'unavailable', 'none'] }}
+
+            - choose:
+                - conditions: "{{ role_match and push_ok }}"
+                  sequence:
+                    - service: "{{ push_target }}"
+                      continue_on_error: true
+                      data:
+                        title: "{{ effective_title }}"
+                        message: "{{ message | default('') }}"
+
+            - choose:
+                - conditions: "{{ role_match and email_ok }}"
+                  sequence:
+                    - service: notify.notify_smtp
+                      continue_on_error: true
+                      data:
+                        title: "{{ effective_title }}"
+                        message: "{{ message | default('') }}"
+                        target: "{{ email_addr }}"

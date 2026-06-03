@@ -1,0 +1,40 @@
+# Fichier de configuration des utilisateurs notifications.
+# Placer dans /config/notifications_users.yaml sur votre instance HA.
+# Ce fichier n'est pas versionnable si PROD (contient des emails/cibles push reels).
+#
+# Apres modification : appeler notifications_manager.reload ou redemarrer HA.
+
+version: 1
+
+roles_available:
+  - admin
+  - proprietaire
+  - resident
+  - utilisateur
+
+users:
+  - id: jean            # slug ASCII unique, minuscules, pas d'espace
+    ha_user: jean       # nom du compte HA correspondant (hass.user.name)
+    label: "Jean"       # libelle affiche dans la card et le dashboard
+    email: ""           # laisser vide si pas d'email
+    email_enabled: false
+    push_target: ""     # ex: notify.mobile_app_mon_telephone
+    push_enabled: false
+    roles:
+      admin: true
+      proprietaire: true
+      resident: false
+      utilisateur: false
+
+  - id: marie
+    ha_user: marie
+    label: "Marie"
+    email: ""
+    email_enabled: false
+    push_target: ""
+    push_enabled: false
+    roles:
+      admin: false
+      proprietaire: false
+      resident: true
+      utilisateur: false

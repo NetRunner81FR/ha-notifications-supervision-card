@@ -1,0 +1,10 @@
+# Extrait a ajouter dans votre configuration.yaml Home Assistant
+# Prerequis : notifications_manager installe dans custom_components/
+
+notifications_manager: {}
+
+# Optionnel si HACS gere la card (HACS ajoute la ressource automatiquement).
+# Necessaire si vous deploiez le fichier JS manuellement dans www/custom-cards/.
+frontend:
+  extra_module_url:
+    - /local/custom-cards/notifications-supervision-card.js?v=0.4.0

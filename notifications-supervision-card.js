@@ -1,5 +1,5 @@
 const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -7,6 +7,9 @@ const SETTINGS_ALLOWLIST =
 
 // Allowlist push target : text.notif_*_push_target (notifications_manager v1+)
 const PUSH_TARGET_ALLOWLIST = /^text\.notif_[a-z0-9_]+_push_target$/;
+
+// Allowlist email : text.notif_*_email (notifications_manager v1+)
+const EMAIL_ALLOWLIST = /^text\.notif_[a-z0-9_]+_email$/;
 
 class NotificationsSupervisionCard extends HTMLElement {
   static getStubConfig() {
@@ -189,7 +192,10 @@ class NotificationsSupervisionCard extends HTMLElement {
   }
 
   _auditPersons(users) {
-    const configured = new Set(users.map((u) => this._normalize(u.label)));
+    const configured = new Set([
+      ...users.map((u) => this._normalize(u.label)),
+      ...users.map((u) => this._normalize(u.slug)),
+    ]);
     const ignored = new Set(
       this._config.ignored_persons.map((p) => this._normalize(p))
     );
@@ -479,6 +485,9 @@ class NotificationsSupervisionCard extends HTMLElement {
         </div>
         <div class="rows">
           ${this._settingsToggle(`switch.notif_${u.slug}_email_enabled`, "Email", u.emailEnabled, editable)}
+          ${editable
+            ? `<div class="row"><input type="email" class="form-input" data-email-entity="text.notif_${this._escape(u.slug)}_email" placeholder="adresse@exemple.fr" value="${this._escape(u.email || "")}"></div>`
+            : (u.email ? `<div class="row"><span class="email-display">${this._escape(u.email)}</span></div>` : "")}
           ${this._settingsPushRow(u, mobileApps, editable)}
           ${rolesLabels.map(([name, key]) => this._settingsToggle(
             `switch.notif_${u.slug}_${key}`, name,
@@ -683,6 +692,17 @@ class NotificationsSupervisionCard extends HTMLElement {
         if (SETTINGS_ALLOWLIST.test(id)) {
           const domain = id.startsWith("switch.") ? "switch" : "input_boolean";
           this._hass.callService(domain, "toggle", { entity_id: id });
+        }
+      });
+    });
+
+    // Champ email utilisateur existant
+    root.querySelectorAll("input[data-email-entity]").forEach((input) => {
+      input.addEventListener("change", (e) => {
+        const id = e.target.dataset.emailEntity;
+        const val = e.target.value.trim();
+        if (EMAIL_ALLOWLIST.test(id)) {
+          this._hass.callService("text", "set_value", { entity_id: id, value: val });
         }
       });
     });
@@ -928,6 +948,7 @@ class NotificationsSupervisionCard extends HTMLElement {
       .form-rows{display:grid;gap:8px;margin-bottom:12px}
       .form-rows label{font-size:12px;color:var(--secondary-text-color);display:grid;gap:3px}
       .form-input{border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);width:100%;box-sizing:border-box}
+      .email-display{font-size:11px;color:var(--secondary-text-color)}
       .form-input.invalid{border-color:var(--error-color,#e53935)}
       .slug-error{color:var(--error-color,#e53935);font-size:11px;margin-left:6px}
       .roles-row{display:flex;gap:10px;flex-wrap:wrap}
