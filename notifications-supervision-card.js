@@ -1,64 +1,26 @@
-const CARD_NAME = "notifications-supervision-card";
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|input_boolean\.notif_smtp_active|input_boolean\.[a-z0-9_]+_notifications)$/;
 
-// Allowlist push target : text.notif_*_push_target (notifications_manager v1+)
+// Allowlist push target : text.notif_*_push_target
 const PUSH_TARGET_ALLOWLIST = /^text\.notif_[a-z0-9_]+_push_target$/;
 
-// Allowlist email : text.notif_*_email (notifications_manager v1+)
+// Allowlist email : text.notif_*_email
 const EMAIL_ALLOWLIST = /^text\.notif_[a-z0-9_]+_email$/;
 
-class NotificationsSupervisionCard extends HTMLElement {
-  static getStubConfig() {
-    return {
-      type: `custom:${CARD_NAME}`,
-      view: "users",
-      ignored_persons: ["test_user", "tester_rec"],
-    };
-  }
+// ── Classe de base ─────────────────────────────────────────────────────────────
 
+class NotificationsBaseCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
-    // Etat formulaire add/remove (persiste entre les renders hass)
-    this._addExpanded = null;  // slug person en cours d'ajout
-    this._addForm = {};        // valeurs du formulaire {label,id,email,pushTarget,roles}
-    this._removeConfirm = null; // slug user en attente de confirmation suppression
-  }
-
-  setConfig(config) {
-    const hasSections =
-      Array.isArray(config.sections) || typeof config.sections === "string";
-    const hasView = typeof config.view === "string" && config.view.length > 0;
-
-    this._config = {
-      // Nouveau parametre view ; si absent mais sections present -> mode legacy
-      view: hasView ? config.view : hasSections ? "legacy" : "users",
-      // Mode legacy : sections conservees pour retro-compat
-      sections: hasSections
-        ? Array.isArray(config.sections)
-          ? config.sections
-          : [String(config.sections)]
-        : ["users", "audit", "supervision"],
-      // Filtre optionnel pour supervision (ex: group: mqtt)
-      group: config.group || null,
-      // Mode edit uniquement dans view: settings
-      mode: config.mode === "edit" ? "edit" : "read",
-      // Titre personnalise (remplace l'auto-titre)
-      title: config.title || null,
-      // Personnes HA a exclure de l'audit
-      ignored_persons: Array.isArray(config.ignored_persons)
-        ? config.ignored_persons
-        : [],
-      // Groupes supervision personnalises
-      supervision_groups: config.supervision_groups || null,
-    };
-    this._render();
+    this._addExpanded = null;
+    this._addForm = {};
+    this._removeConfirm = null;
   }
 
   set hass(hass) {
@@ -66,83 +28,7 @@ class NotificationsSupervisionCard extends HTMLElement {
     this._render();
   }
 
-  getCardSize() {
-    const sizes = {
-      users: 4,
-      audit: 3,
-      supervision: 5,
-      settings: 5,
-      legacy: 10,
-    };
-    return sizes[this._config.view] ?? 5;
-  }
-
-  // ── Titre automatique par vue ──────────────────────────────────────────────
-
-  _autoTitle() {
-    if (this._config.title) return this._config.title;
-    const map = {
-      users: "Utilisateurs notifications",
-      audit: "Audit couverture HA",
-      supervision:
-        this._config.group
-          ? `Supervision – ${this._config.group}`
-          : "Supervision",
-      settings: "Paramètres notifications",
-      legacy: "Notifications / Supervision",
-    };
-    return map[this._config.view] ?? "Notifications / Supervision";
-  }
-
-  // ── Rendu principal ────────────────────────────────────────────────────────
-
-  _render() {
-    if (!this.shadowRoot || !this._hass) return;
-
-    const view = this._config.view;
-    let body = "";
-
-    if (view === "legacy") {
-      const sections = new Set(this._config.sections);
-      const users = this._discoverUsers();
-      if (sections.has("users")) body += this._renderUsers(users);
-      if (sections.has("audit")) body += this._renderAudit(this._auditPersons(users));
-      if (sections.has("supervision")) body += this._renderSupervision(this._discoverSupervision());
-    } else if (view === "users") {
-      body = this._renderUsers(this._discoverUsers());
-    } else if (view === "audit") {
-      body = this._renderAudit(this._auditPersons(this._discoverUsers()));
-    } else if (view === "supervision") {
-      body = this._renderSupervision(this._discoverSupervision());
-    } else if (view === "settings") {
-      if (!this._hasNotifEntities()) {
-        body = this._renderSetupGuide();
-      } else {
-        const users = this._discoverUsers();
-        body = this._renderSettings(users);
-      }
-    } else {
-      body = `<div class="empty">Vue inconnue : ${this._escape(view)}</div>`;
-    }
-
-    this.shadowRoot.innerHTML = `
-      <style>${this._styles()}</style>
-      <ha-card>
-        <div class="card">
-          <div class="head">
-            <span class="card-title">${this._escape(this._autoTitle())}</span>
-            <span class="version">v${VERSION}</span>
-          </div>
-          ${body}
-        </div>
-      </ha-card>`;
-
-    if (view === "settings") {
-      this._attachSettingsListeners();
-    }
-  }
-
-  // ── Decouverte ─────────────────────────────────────────────────────────────
+  // ── Decouverte ───────────────────────────────────────────────────────────────
 
   _discoverUsers() {
     return Object.keys(this._hass.states || {})
@@ -170,14 +56,11 @@ class NotificationsSupervisionCard extends HTMLElement {
       .sort((a, b) => a.label.localeCompare(b.label, "fr"));
   }
 
-  // Resout le niveau d acces a la vue settings pour l utilisateur HA courant.
-  // Retourne "write", "read" ou "none".
   _resolveSettingsAccess() {
     if (!this._hass) return "none";
     if (this._hass.user?.is_admin) return "write";
     const haName = (this._hass.user?.name || "").toLowerCase();
     if (!haName) return "none";
-    // Chercher un profil dont ha_user correspond au compte HA courant
     const slug = Object.keys(this._hass.states || {})
       .filter((id) => id.startsWith("text.notif_") && id.endsWith("_label"))
       .map((id) => id.slice("text.notif_".length, -"_label".length))
@@ -197,7 +80,7 @@ class NotificationsSupervisionCard extends HTMLElement {
       ...users.map((u) => this._normalize(u.slug)),
     ]);
     const ignored = new Set(
-      this._config.ignored_persons.map((p) => this._normalize(p))
+      (this._config.ignored_persons || []).map((p) => this._normalize(p))
     );
     const persons = Object.entries(this._hass.states || {})
       .filter(([id]) => id.startsWith("person."))
@@ -224,25 +107,22 @@ class NotificationsSupervisionCard extends HTMLElement {
     return { persons, missing, ignored: ignoredList };
   }
 
-  // Vrai si notifications_manager est charge (au moins une entite notif existe)
   _hasNotifEntities() {
     return Object.keys(this._hass.states || {}).some(
       (id) => id.startsWith("text.notif_") || id.startsWith("switch.notif_")
     );
   }
 
-  // Derive un slug ASCII depuis un friendly_name
   _toSlug(name) {
     return String(name || "")
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[̀-ͯ]/g, "")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 30);
   }
 
-  // Vrai si le slug correspond au compte HA courant (protection anti-lockout)
   _isSelf(slug) {
     if (!this._hass.user) return false;
     const haName = (this._hass.user.name || "").toLowerCase();
@@ -365,7 +245,7 @@ class NotificationsSupervisionCard extends HTMLElement {
       .sort();
   }
 
-  // ── Rendus sections ────────────────────────────────────────────────────────
+  // ── Rendus sections ──────────────────────────────────────────────────────────
 
   _renderUsers(users) {
     if (!users.length) {
@@ -380,21 +260,9 @@ class NotificationsSupervisionCard extends HTMLElement {
             ${this._badge(ok ? "OK" : "Incomplet", ok ? "ok" : "warn")}
           </div>
           <div class="rows">
-            ${this._row(
-              "Email",
-              u.emailEnabled === true ? "Actif" : "Inactif",
-              u.email
-            )}
-            ${this._row(
-              "Push",
-              u.pushEnabled === true ? "Actif" : "Inactif",
-              u.pushTarget
-            )}
-            ${this._row(
-              "Niveaux",
-              u.roles.length ? u.roles.join(", ") : "Aucun",
-              ""
-            )}
+            ${this._row("Email", u.emailEnabled === true ? "Actif" : "Inactif", u.email)}
+            ${this._row("Push", u.pushEnabled === true ? "Actif" : "Inactif", u.pushTarget)}
+            ${this._row("Niveaux", u.roles.length ? u.roles.join(", ") : "Aucun", "")}
           </div>
         </article>`;
       })
@@ -497,7 +365,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       </article>`;
     }).join("");
 
-    // Personnes sans profil (section add)
     const audit = this._auditPersons(users);
     let unconfiguredHtml = "";
     if (editable) {
@@ -619,7 +486,7 @@ class NotificationsSupervisionCard extends HTMLElement {
     </article>`;
   }
 
-  // ── Composants settings ────────────────────────────────────────────────────
+  // ── Composants settings ──────────────────────────────────────────────────────
 
   _settingsToggle(entityId, label, value, editable) {
     const allowed = SETTINGS_ALLOWLIST.test(entityId);
@@ -633,59 +500,46 @@ class NotificationsSupervisionCard extends HTMLElement {
         </label>
       </div>`;
     }
-    const display =
-      value === true ? "Actif" : value === false ? "Inactif" : "—";
+    const display = value === true ? "Actif" : value === false ? "Inactif" : "—";
     return this._row(label, display, "");
   }
 
   _settingsPushRow(user, mobileApps, editable) {
-    // Toggle push enabled
     const toggleHtml = this._settingsToggle(
       `switch.notif_${user.slug}_push_enabled`,
       "Push",
       user.pushEnabled,
       editable
     );
-    // Si mode edit et plusieurs mobile_app disponibles : select de cible
     if (editable && mobileApps.length > 1) {
       const current = user.pushTarget || "";
       const opts = [
         `<option value="" ${!current ? "selected" : ""}>(saisie manuelle)</option>`,
         ...mobileApps.map(
           (app) =>
-            `<option value="${this._escape(app)}" ${
-              current === app ? "selected" : ""
-            }>${this._escape(app)}</option>`
+            `<option value="${this._escape(app)}" ${current === app ? "selected" : ""}>${this._escape(app)}</option>`
         ),
       ].join("");
-      const selectHtml = `<div class="row">
+      return toggleHtml + `<div class="row">
         <span>Cible push</span>
-        <select class="push-select" data-push-entity="${this._escape(
-          `text.notif_${user.slug}_push_target`
-        )}">${opts}</select>
+        <select class="push-select" data-push-entity="${this._escape(`text.notif_${user.slug}_push_target`)}">${opts}</select>
       </div>`;
-      return toggleHtml + selectHtml;
     }
-    // Un seul mobile_app : afficher comme hint
     if (editable && mobileApps.length === 1 && !user.pushTarget) {
-      return (
-        toggleHtml +
-        `<div class="row hint-row">
-          <span>Cible disponible</span>
-          <small>${this._escape(mobileApps[0])}</small>
-        </div>`
-      );
+      return toggleHtml + `<div class="row hint-row">
+        <span>Cible disponible</span>
+        <small>${this._escape(mobileApps[0])}</small>
+      </div>`;
     }
     return toggleHtml;
   }
 
-  // ── Listeners interactifs (settings) ─────────────────────────────────────
+  // ── Listeners interactifs ────────────────────────────────────────────────────
 
   _attachSettingsListeners() {
     if (!this.shadowRoot) return;
     const root = this.shadowRoot;
 
-    // Toggles entites existantes
     root.querySelectorAll("input[data-entity]").forEach((input) => {
       input.addEventListener("change", (e) => {
         const id = e.target.dataset.entity;
@@ -696,7 +550,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Champ email utilisateur existant
     root.querySelectorAll("input[data-email-entity]").forEach((input) => {
       input.addEventListener("change", (e) => {
         const id = e.target.dataset.emailEntity;
@@ -707,7 +560,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Select push cible utilisateur existant
     root.querySelectorAll("select.push-select[data-push-entity]").forEach((sel) => {
       sel.addEventListener("change", (e) => {
         const id = e.target.dataset.pushEntity;
@@ -718,7 +570,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton Retirer : afficher confirmation
     root.querySelectorAll("[data-remove-user]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         this._removeConfirm = e.currentTarget.dataset.removeUser;
@@ -727,7 +578,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton Confirmer suppression
     root.querySelectorAll("[data-confirm-remove]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const slug = e.currentTarget.dataset.confirmRemove;
@@ -737,7 +587,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton Annuler suppression
     root.querySelectorAll("[data-cancel-remove]").forEach((btn) => {
       btn.addEventListener("click", () => {
         this._removeConfirm = null;
@@ -745,7 +594,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton + Ajouter : ouvrir formulaire
     root.querySelectorAll("[data-add-person]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const personId = e.currentTarget.dataset.addPerson;
@@ -763,23 +611,19 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Inputs du formulaire d'ajout : mettre a jour _addForm
     root.querySelectorAll(".form-card input[data-field]").forEach((input) => {
       input.addEventListener("input", (e) => {
         this._addForm[e.target.dataset.field] = e.target.value;
-        // Re-render uniquement pour valider le slug (disable/enable bouton)
         if (e.target.dataset.field === "id") this._render();
       });
     });
 
-    // Select push dans formulaire d'ajout
     root.querySelectorAll(".add-push-select").forEach((sel) => {
       sel.addEventListener("change", (e) => {
         this._addForm.pushTarget = e.target.value;
       });
     });
 
-    // Checkboxes roles dans formulaire d'ajout
     root.querySelectorAll(".form-card input[data-role]").forEach((cb) => {
       cb.addEventListener("change", (e) => {
         if (!this._addForm.roles) this._addForm.roles = {};
@@ -787,11 +631,9 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton Confirmer l'ajout
     root.querySelectorAll("[data-confirm-add]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const f = this._addForm;
-        // Lire les valeurs actuelles depuis le DOM avant d'appeler le service
         const labelInput = root.querySelector(".form-card input[data-field='label']");
         const idInput = root.querySelector(".form-card input[data-field='id']");
         const emailInput = root.querySelector(".form-card input[data-field='email']");
@@ -821,7 +663,6 @@ class NotificationsSupervisionCard extends HTMLElement {
       });
     });
 
-    // Bouton Annuler ajout
     root.querySelectorAll("[data-cancel-add]").forEach((btn) => {
       btn.addEventListener("click", () => {
         this._addExpanded = null;
@@ -831,7 +672,21 @@ class NotificationsSupervisionCard extends HTMLElement {
     });
   }
 
-  // ── Utilitaires HTML ───────────────────────────────────────────────────────
+  // ── Utilitaires HTML ─────────────────────────────────────────────────────────
+
+  _wrapCard(title, body) {
+    return `
+      <style>${this._styles()}</style>
+      <ha-card>
+        <div class="card">
+          <div class="head">
+            <span class="card-title">${this._escape(title)}</span>
+            <span class="version">v${VERSION}</span>
+          </div>
+          ${body}
+        </div>
+      </ha-card>`;
+  }
 
   _entityRow(entityId) {
     const s = this._hass.states[entityId];
@@ -854,7 +709,7 @@ class NotificationsSupervisionCard extends HTMLElement {
     return `<span class="badge ${kind}">${this._escape(text)}</span>`;
   }
 
-  // ── Utilitaires donnees ────────────────────────────────────────────────────
+  // ── Utilitaires donnees ──────────────────────────────────────────────────────
 
   _state(entityId) {
     const v = this._hass.states?.[entityId]?.state;
@@ -879,20 +734,17 @@ class NotificationsSupervisionCard extends HTMLElement {
   }
 
   _normalize(v) {
-    return String(v || "")
-      .trim()
-      .toLowerCase();
+    return String(v || "").trim().toLowerCase();
   }
 
   _escape(v) {
     return String(v ?? "").replace(
       /[&<>'"]/g,
-      (c) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])
     );
   }
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Styles ───────────────────────────────────────────────────────────────────
 
   _styles() {
     return `
@@ -972,23 +824,207 @@ class NotificationsSupervisionCard extends HTMLElement {
   }
 }
 
-if (!customElements.get(CARD_NAME)) {
-  customElements.define(CARD_NAME, NotificationsSupervisionCard);
+// ── Carte : Utilisateurs (lecture seule) ──────────────────────────────────────
+
+class NotificationsUsersCard extends NotificationsBaseCard {
+  static getStubConfig() {
+    return {
+      type: "custom:notifications-users-card",
+      ignored_persons: [],
+    };
+  }
+
+  setConfig(config) {
+    this._config = {
+      title: config.title || null,
+      ignored_persons: Array.isArray(config.ignored_persons) ? config.ignored_persons : [],
+    };
+    this._render();
+  }
+
+  getCardSize() { return 4; }
+
+  _render() {
+    if (!this.shadowRoot || !this._hass) return;
+    const title = this._config.title || "Utilisateurs notifications";
+    this.shadowRoot.innerHTML = this._wrapCard(title, this._renderUsers(this._discoverUsers()));
+  }
 }
 
+// ── Carte : Paramètres / Gestion (édition CRUD) ───────────────────────────────
+
+class NotificationsSettingsCard extends NotificationsBaseCard {
+  static getStubConfig() {
+    return {
+      type: "custom:notifications-settings-card",
+      ignored_persons: [],
+    };
+  }
+
+  setConfig(config) {
+    this._config = {
+      title: config.title || null,
+      ignored_persons: Array.isArray(config.ignored_persons) ? config.ignored_persons : [],
+      mode: "edit",
+    };
+    this._render();
+  }
+
+  getCardSize() { return 6; }
+
+  _render() {
+    if (!this.shadowRoot || !this._hass) return;
+    const title = this._config.title || "Paramètres notifications";
+    const body = this._hasNotifEntities()
+      ? this._renderSettings(this._discoverUsers())
+      : this._renderSetupGuide();
+    this.shadowRoot.innerHTML = this._wrapCard(title, body);
+    this._attachSettingsListeners();
+  }
+}
+
+// ── Carte : Audit couverture HA ───────────────────────────────────────────────
+
+class NotificationsAuditCard extends NotificationsBaseCard {
+  static getStubConfig() {
+    return {
+      type: "custom:notifications-audit-card",
+      ignored_persons: [],
+    };
+  }
+
+  setConfig(config) {
+    this._config = {
+      title: config.title || null,
+      ignored_persons: Array.isArray(config.ignored_persons) ? config.ignored_persons : [],
+    };
+    this._render();
+  }
+
+  getCardSize() { return 3; }
+
+  _render() {
+    if (!this.shadowRoot || !this._hass) return;
+    const title = this._config.title || "Audit couverture HA";
+    const users = this._discoverUsers();
+    this.shadowRoot.innerHTML = this._wrapCard(title, this._renderAudit(this._auditPersons(users)));
+  }
+}
+
+// ── Carte : Supervision (+ rétrocompat view: xxx) ────────────────────────────
+
+class NotificationsSupervisionCard extends NotificationsBaseCard {
+  static getStubConfig() {
+    return {
+      type: "custom:notifications-supervision-card",
+    };
+  }
+
+  setConfig(config) {
+    const hasSections =
+      Array.isArray(config.sections) || typeof config.sections === "string";
+    const hasView = typeof config.view === "string" && config.view.length > 0;
+
+    this._config = {
+      view: hasView ? config.view : hasSections ? "legacy" : "supervision",
+      sections: hasSections
+        ? Array.isArray(config.sections) ? config.sections : [String(config.sections)]
+        : ["users", "audit", "supervision"],
+      group: config.group || null,
+      mode: config.mode === "edit" ? "edit" : "read",
+      title: config.title || null,
+      ignored_persons: Array.isArray(config.ignored_persons) ? config.ignored_persons : [],
+      supervision_groups: config.supervision_groups || null,
+    };
+    this._render();
+  }
+
+  getCardSize() {
+    const sizes = { users: 4, audit: 3, supervision: 5, settings: 5, legacy: 10 };
+    return sizes[this._config.view] ?? 5;
+  }
+
+  _autoTitle() {
+    if (this._config.title) return this._config.title;
+    const map = {
+      users: "Utilisateurs notifications",
+      audit: "Audit couverture HA",
+      supervision: this._config.group ? `Supervision – ${this._config.group}` : "Supervision",
+      settings: "Paramètres notifications",
+      legacy: "Notifications / Supervision",
+    };
+    return map[this._config.view] ?? "Supervision";
+  }
+
+  _render() {
+    if (!this.shadowRoot || !this._hass) return;
+    const view = this._config.view;
+    let body = "";
+
+    if (view === "legacy") {
+      const sections = new Set(this._config.sections);
+      const users = this._discoverUsers();
+      if (sections.has("users")) body += this._renderUsers(users);
+      if (sections.has("audit")) body += this._renderAudit(this._auditPersons(users));
+      if (sections.has("supervision")) body += this._renderSupervision(this._discoverSupervision());
+    } else if (view === "users") {
+      body = this._renderUsers(this._discoverUsers());
+    } else if (view === "audit") {
+      body = this._renderAudit(this._auditPersons(this._discoverUsers()));
+    } else if (view === "settings") {
+      body = this._hasNotifEntities()
+        ? this._renderSettings(this._discoverUsers())
+        : this._renderSetupGuide();
+    } else {
+      body = this._renderSupervision(this._discoverSupervision());
+    }
+
+    this.shadowRoot.innerHTML = this._wrapCard(this._autoTitle(), body);
+    if (view === "settings") this._attachSettingsListeners();
+  }
+}
+
+// ── Enregistrement ────────────────────────────────────────────────────────────
+
+const CARDS = [
+  {
+    cls: NotificationsUsersCard,
+    type: "notifications-users-card",
+    name: "Notifications – Utilisateurs",
+    description: "Vue synthétique des profils utilisateurs notifications.",
+  },
+  {
+    cls: NotificationsSettingsCard,
+    type: "notifications-settings-card",
+    name: "Notifications – Paramètres",
+    description: "Gestion CRUD des utilisateurs et paramètres notifications.",
+  },
+  {
+    cls: NotificationsAuditCard,
+    type: "notifications-audit-card",
+    name: "Notifications – Audit",
+    description: "Audit de couverture des personnes HA sans profil notifications.",
+  },
+  {
+    cls: NotificationsSupervisionCard,
+    type: "notifications-supervision-card",
+    name: "Notifications – Supervision",
+    description: "Supervision des groupes de notifications et entités métier.",
+  },
+];
+
 window.customCards = window.customCards || [];
-if (!window.customCards.find((c) => c.type === CARD_NAME)) {
-  window.customCards.push({
-    type: CARD_NAME,
-    name: "Notifications Supervision Card",
-    description:
-      "Carte dynamique modulaire pour les notifications et la supervision Home Assistant.",
-    preview: true,
-  });
+
+for (const { cls, type, name, description } of CARDS) {
+  if (!customElements.get(type)) {
+    customElements.define(type, cls);
+  }
+  if (!window.customCards.find((c) => c.type === type)) {
+    window.customCards.push({ type, name, description, preview: true });
+  }
 }
 
 console.info(
-  `%c${CARD_NAME} v${VERSION} loaded`,
+  `%cnotifications-cards v${VERSION} loaded (4 cards)`,
   "color:#03a9f4;font-weight:bold;background:#e3f2fd;padding:2px 6px;border-radius:4px"
 );
-// v0.3.0: notifications_manager integration — switch/text entities, role-based access
