@@ -3,7 +3,6 @@
 Custom Lovelace card for Home Assistant — manage notification profiles and
 supervision dashboards dynamically.
 
-
 Version: 0.5.3
 
 ## Prerequisites
@@ -16,9 +15,8 @@ Version: 0.5.3
 ## Installation via HACS
 
 1. HACS > Custom repositories > add this repository URL > type **Plugin**
-2. Enable **Beta updates** in HACS settings to see pre-releases
-3. Install **Notifications Supervision Card**
-4. Clear browser cache (Ctrl+Shift+R)
+2. Install **Notifications Supervision Card**
+3. Clear browser cache (Ctrl+Shift+R)
 
 ## Configuration
 
@@ -34,14 +32,17 @@ Add to your `configuration.yaml` (see `examples/configuration.yaml`):
 notifications_manager: {}
 ```
 
-If HACS manages the card, the resource is added automatically.
-If you deploy the JS manually, also add:
+If HACS manages the card, the resource is added automatically (recommended).
+If you deploy the JS manually (HA 2025 and earlier only), add to `lovelace.resources`:
 
 ```yaml
-frontend:
-  extra_module_url:
-    - /local/custom-cards/notifications-supervision-card.js?v=0.4.0
+lovelace:
+  resources:
+    - url: /local/custom-cards/notifications-supervision-card.js?v=0.5.3
+      type: module
 ```
+
+Note: `extra_module_url` is not supported in HA 2026+.
 
 ### 3. Create notifications_users.yaml
 
@@ -136,8 +137,8 @@ is configured. Check logs for integration errors.
 **Card shows "Access denied":** your HA account is not mapped to a
 `notifications_users.yaml` entry with role admin or proprietaire.
 
-**Double load warning in console:** normal if both HACS resource and
-`extra_module_url` are active. The card handles double registration gracefully.
+**Double load warning in console:** normal if both HACS resource and a manual
+`lovelace.resources` entry are active. Remove the manual entry to resolve.
 
 **Entities not appearing:** restart HA after modifying `notifications_users.yaml`
 or call `notifications_manager.reload`.
