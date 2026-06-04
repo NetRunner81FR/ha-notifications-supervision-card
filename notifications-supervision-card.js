@@ -1,4 +1,4 @@
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -430,7 +430,8 @@ class NotificationsBaseCard extends HTMLElement {
   _renderAddForm(person) {
     const f = this._addForm;
     const slug = this._toSlug(person.name);
-    const slugConflict = Boolean(this._hass.states[`text.notif_${slug}_label`]);
+    // Verifier via _isUseful/_state pour ignorer les entites stales (unavailable/unknown)
+    const slugConflict = this._isUseful(this._state(`text.notif_${slug}_label`));
     const rolesLabels = [
       ["Admin", "admin"], ["Propriétaire", "proprietaire"],
       ["Résident", "resident"], ["Utilisateur", "utilisateur"],
