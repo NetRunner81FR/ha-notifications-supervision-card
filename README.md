@@ -3,7 +3,8 @@
 Custom Lovelace card for Home Assistant — manage notification profiles and
 supervision dashboards dynamically.
 
-Version: 0.4.0-beta.1
+
+Version: 0.5.3
 
 ## Prerequisites
 
