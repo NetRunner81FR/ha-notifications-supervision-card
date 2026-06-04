@@ -1,4 +1,4 @@
-const VERSION = "0.5.0";
+const VERSION = "0.5.2";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -429,9 +429,8 @@ class NotificationsBaseCard extends HTMLElement {
 
   _renderAddForm(person) {
     const f = this._addForm;
-    const defaultLabel = f.label !== undefined ? f.label : person.name;
-    const defaultId = f.id !== undefined ? f.id : this._toSlug(person.name);
-    const slugValid = /^[a-z0-9][a-z0-9_]{0,29}$/.test(defaultId);
+    const slug = this._toSlug(person.name);
+    const slugConflict = Boolean(this._hass.states[`text.notif_${slug}_label`]);
     const rolesLabels = [
       ["Admin", "admin"], ["Propriétaire", "proprietaire"],
       ["Résident", "resident"], ["Utilisateur", "utilisateur"],
@@ -451,17 +450,12 @@ class NotificationsBaseCard extends HTMLElement {
          </select>`
       : `<input type="text" class="form-input" data-field="pushTarget" placeholder="notify.mobile_app_..." value="${this._escape(f.pushTarget || (mobileApps[0] || ""))}">`;
 
-    return `<div class="form-card" data-form-person="${this._escape(person.id)}">
-      <div class="form-title">👤 ${this._escape(person.name)}</div>
+    return `<div class="form-card" data-form-person="${this._escape(person.id)}" data-form-slug="${this._escape(slug)}">
+      <div class="form-title">👤 ${this._escape(person.name)} <span class="form-slug-hint">${this._escape(slug)}</span></div>
+      ${slugConflict ? `<div class="banner slug-conflict-banner">Un profil avec l'identifiant <code>${this._escape(slug)}</code> existe déjà.</div>` : ""}
       <div class="form-rows">
-        <label>Libellé
-          <input type="text" class="form-input" data-field="label" value="${this._escape(defaultLabel)}">
-        </label>
-        <label>Slug (id) ${slugValid ? "" : `<span class="slug-error">invalide</span>`}
-          <input type="text" class="form-input slug-input ${slugValid ? "" : "invalid"}" data-field="id" value="${this._escape(defaultId)}" placeholder="ex: jean_marc">
-        </label>
         <label>Email
-          <input type="text" class="form-input" data-field="email" placeholder="adresse@exemple.fr" value="${this._escape(f.email || "")}">
+          <input type="text" class="form-input" data-field="email" placeholder="adresse@exemple.fr" value="${this._escape(f.email || "")}" ${slugConflict ? "disabled" : ""}>
         </label>
         <label>Push cible
           ${pushOpts}
@@ -469,7 +463,7 @@ class NotificationsBaseCard extends HTMLElement {
         <div class="roles-row">${rolesHtml}</div>
       </div>
       <div class="form-actions">
-        <button class="add-confirm-btn" data-confirm-add="${this._escape(person.id)}" ${slugValid ? "" : "disabled"}>Confirmer l'ajout</button>
+        <button class="add-confirm-btn" data-confirm-add="${this._escape(person.id)}" ${slugConflict ? "disabled" : ""}>Confirmer l'ajout</button>
         <button class="cancel-btn" data-cancel-add="${this._escape(person.id)}">Annuler</button>
       </div>
     </div>`;
@@ -614,7 +608,6 @@ class NotificationsBaseCard extends HTMLElement {
     root.querySelectorAll(".form-card input[data-field]").forEach((input) => {
       input.addEventListener("input", (e) => {
         this._addForm[e.target.dataset.field] = e.target.value;
-        if (e.target.dataset.field === "id") this._render();
       });
     });
 
@@ -634,12 +627,11 @@ class NotificationsBaseCard extends HTMLElement {
     root.querySelectorAll("[data-confirm-add]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const f = this._addForm;
-        const labelInput = root.querySelector(".form-card input[data-field='label']");
-        const idInput = root.querySelector(".form-card input[data-field='id']");
+        const formCard = root.querySelector(".form-card");
+        const label = (f.label || "").trim();
+        const id = (formCard?.dataset.formSlug || f.id || "").trim();
         const emailInput = root.querySelector(".form-card input[data-field='email']");
         const pushInput = root.querySelector(".form-card input[data-field='pushTarget']");
-        const label = (labelInput?.value || f.label || "").trim();
-        const id = (idInput?.value || f.id || "").trim();
         const email = (emailInput?.value || f.email || "").trim();
         const pushTarget = (pushInput?.value || f.pushTarget || "").trim()
           || root.querySelector(".add-push-select")?.value || "";
@@ -796,13 +788,16 @@ class NotificationsBaseCard extends HTMLElement {
       .tile-danger{border-color:var(--error-color,#e53935);background:rgba(229,57,53,.04)}
       .danger-msg{font-size:12px;color:var(--secondary-text-color);margin:6px 0 10px}
       .form-card{border:1px solid var(--primary-color,#03a9f4);border-radius:12px;padding:12px;background:var(--card-background-color)}
-      .form-title{font-weight:700;font-size:13px;margin-bottom:10px}
+      .form-title{font-weight:700;font-size:13px;margin-bottom:10px;display:flex;align-items:baseline;gap:8px}
+      .form-slug-hint{font-size:11px;font-weight:400;color:var(--secondary-text-color);font-family:monospace}
       .form-rows{display:grid;gap:8px;margin-bottom:12px}
       .form-rows label{font-size:12px;color:var(--secondary-text-color);display:grid;gap:3px}
       .form-input{border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);width:100%;box-sizing:border-box}
       .email-display{font-size:11px;color:var(--secondary-text-color)}
       .form-input.invalid{border-color:var(--error-color,#e53935)}
       .slug-error{color:var(--error-color,#e53935);font-size:11px;margin-left:6px}
+      .slug-conflict-banner{background:rgba(229,57,53,.08);color:var(--error-color,#e53935);border-radius:6px;padding:6px 10px;font-size:12px;margin-bottom:10px}
+      .slug-conflict-banner code{background:rgba(229,57,53,.12);padding:1px 4px;border-radius:3px;font-size:11px}
       .roles-row{display:flex;gap:10px;flex-wrap:wrap}
       .role-check{display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;color:var(--primary-text-color)}
       .form-actions{display:flex;gap:8px;flex-wrap:wrap}
