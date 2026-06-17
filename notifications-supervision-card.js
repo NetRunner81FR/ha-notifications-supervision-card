@@ -1,8 +1,8 @@
-const VERSION = "0.5.3";
+const VERSION = "0.5.4-beta.1";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
-  /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|input_boolean\.notif_smtp_active|input_boolean\.[a-z0-9_]+_notifications)$/;
+  /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active|input_boolean\.[a-z0-9_]+_notifications)$/;
 
 // Allowlist push target : text.notif_*_push_target
 const PUSH_TARGET_ALLOWLIST = /^text\.notif_[a-z0-9_]+_push_target$/;
@@ -326,9 +326,9 @@ class NotificationsBaseCard extends HTMLElement {
         : `<div class="banner read-banner">Lecture seule (rôle propriétaire).</div>`;
 
     const smtpHtml = this._settingsToggle(
-      "input_boolean.notif_smtp_active",
+      "switch.notifications_manager_smtp_active",
       "Canal email global (SMTP)",
-      this._boolState("input_boolean.notif_smtp_active"),
+      this._boolState("switch.notifications_manager_smtp_active"),
       editable
     );
 
