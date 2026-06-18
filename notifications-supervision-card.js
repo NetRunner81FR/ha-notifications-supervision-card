@@ -1,4 +1,4 @@
-const VERSION = "0.5.4-beta.1";
+const VERSION = "0.5.4";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =

@@ -1,9 +1,8 @@
 # Changelog
 
-## 0.5.4-beta.1
+## 0.5.4
 
-- Fix toggle SMTP : aligner entite sur switch.notifications_manager_smtp_active (etait input_boolean.notif_smtp_active, legacy inexistante).
-- Correction dans SETTINGS_ALLOWLIST et rendu du toggle SMTP dashboard Gestion.
+- Fix toggle SMTP : aligner entite sur switch.notifications_manager_smtp_active (issue #31)
 
 ## 0.5.3
 
