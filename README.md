@@ -3,7 +3,7 @@
 Custom Lovelace card for Home Assistant — manage notification profiles and
 supervision dashboards dynamically.
 
-Version: 0.5.3
+Version: 0.5.4
 
 ## Prerequisites
 
@@ -38,7 +38,7 @@ If you deploy the JS manually (HA 2025 and earlier only), add to `lovelace.resou
 ```yaml
 lovelace:
   resources:
-    - url: /local/custom-cards/notifications-supervision-card.js?v=0.5.3
+    - url: /local/custom-cards/notifications-supervision-card.js?v=0.5.4
       type: module
 ```
 
