@@ -1,4 +1,4 @@
-const VERSION = "0.5.4";
+const VERSION = "0.5.5";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -25,7 +25,40 @@ class NotificationsBaseCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this._isUserEditing()) {
+      this._render();
+    }
+  }
+
+  _isUserEditing() {
+    const active = this.shadowRoot?.activeElement;
+    if (!active) return false;
+    const tag = active.tagName;
+    const type = (active.type || "").toLowerCase();
+    return (tag === "INPUT" && type !== "checkbox" && type !== "radio") || tag === "TEXTAREA";
+  }
+
+  _saveScrollPosition() {
+    let el = this;
+    while (el.parentElement) {
+      el = el.parentElement;
+      const style = getComputedStyle(el);
+      if (/auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight) {
+        return { el, top: el.scrollTop };
+      }
+    }
+    return { el: window, top: window.scrollY };
+  }
+
+  _restoreScrollPosition(saved) {
+    if (!saved || saved.top <= 0) return;
+    requestAnimationFrame(() => {
+      if (saved.el === window) {
+        window.scrollTo({ top: saved.top, behavior: "instant" });
+      } else {
+        saved.el.scrollTop = saved.top;
+      }
+    });
   }
 
   // ── Decouverte ───────────────────────────────────────────────────────────────
@@ -842,8 +875,10 @@ class NotificationsUsersCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
     const title = this._config.title || "Utilisateurs notifications";
     this.shadowRoot.innerHTML = this._wrapCard(title, this._renderUsers(this._discoverUsers()));
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -870,12 +905,14 @@ class NotificationsSettingsCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
     const title = this._config.title || "Paramètres notifications";
     const body = this._hasNotifEntities()
       ? this._renderSettings(this._discoverUsers())
       : this._renderSetupGuide();
     this.shadowRoot.innerHTML = this._wrapCard(title, body);
     this._attachSettingsListeners();
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -901,9 +938,11 @@ class NotificationsAuditCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
     const title = this._config.title || "Audit couverture HA";
     const users = this._discoverUsers();
     this.shadowRoot.innerHTML = this._wrapCard(title, this._renderAudit(this._auditPersons(users)));
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -955,6 +994,7 @@ class NotificationsSupervisionCard extends NotificationsBaseCard {
   _render() {
     if (!this.shadowRoot || !this._hass) return;
     const view = this._config.view;
+    const scroll = this._saveScrollPosition();
     let body = "";
 
     if (view === "legacy") {
@@ -977,6 +1017,7 @@ class NotificationsSupervisionCard extends NotificationsBaseCard {
 
     this.shadowRoot.innerHTML = this._wrapCard(this._autoTitle(), body);
     if (view === "settings") this._attachSettingsListeners();
+    this._restoreScrollPosition(scroll);
   }
 }
 
