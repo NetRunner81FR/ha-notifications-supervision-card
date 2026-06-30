@@ -1,4 +1,4 @@
-const VERSION = "0.9.2";
+const VERSION = "0.9.3";
 
 // Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
@@ -39,27 +39,19 @@ class NotificationsBaseCard extends HTMLElement {
   }
 
   _saveScrollPosition() {
-    let el = this;
-    while (true) {
-      const next = el.parentElement ??
-        (el.getRootNode?.() instanceof ShadowRoot ? el.getRootNode().host : null);
-      if (!next) break;
-      el = next;
-      if (el === document.documentElement || el === document.body) continue;
-      try {
-        if (el.scrollTop > 0) return { el, top: el.scrollTop };
-      } catch (_) {}
+    // Cherche le premier élément scrollé dans notre propre shadow root uniquement.
+    if (this.shadowRoot) {
+      for (const el of this.shadowRoot.querySelectorAll("*")) {
+        try { if (el.scrollTop > 0) return { el, top: el.scrollTop }; } catch (_) {}
+      }
     }
-    const winTop = window.scrollY || window.pageYOffset || 0;
-    return winTop > 0 ? { el: window, top: winTop } : null;
+    return null;
   }
 
   _restoreScrollPosition(saved) {
     if (!saved) return;
     requestAnimationFrame(() => {
-      if (saved.el === window) {
-        window.scrollTo({ top: saved.top, behavior: "instant" });
-      } else {
+      if (saved.el?.isConnected) {
         saved.el.scrollTop = saved.top;
       }
     });
